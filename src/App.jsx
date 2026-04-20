@@ -77,8 +77,8 @@ const DEMO_SESSIONS = { 1: genSessions("Triathlon"), 2: genSessions("Course à p
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const hooperScore = e => e ? e.fatigue + e.stress + e.doms + (8 - e.sleep) : null;
 const hooperStatus = s => s <= 12 ? { label: "Optimal", color: "#43e97b", icon: "✦" } : s <= 18 ? { label: "Attention", color: "#f7971e", icon: "◈" } : { label: "Surcharge", color: "#ff6b6b", icon: "⚠" };
-const initials = a => (a.first_name?.[0] || "") + (a.last_name?.[0] || "") || "??";
-const fullName = a => `${a.first_name || ""} ${a.last_name || ""}`.trim() || a.username || "Athlète";
+const initials = a => { const fn = a.first_name||a.firstname||a.prenom||""; const ln = a.last_name||a.lastname||a.nom||""; if (fn&&ln) return (fn[0]+ln[0]).toUpperCase(); if (fn) return fn.slice(0,2).toUpperCase(); if (ln) return ln.slice(0,2).toUpperCase(); const un = a.username||a.name||a.email||""; return un ? un.slice(0,2).toUpperCase() : "??"; };
+const fullName = a => { const fn = a.first_name||a.firstname||a.prenom||""; const ln = a.last_name||a.lastname||a.nom||""; if (fn||ln) return (fn+" "+ln).trim(); return a.username||a.name||a.email?.split("@")[0]||"Athlète"; };
 
 function calcFitness(sessions) {
   const done = sessions.filter(s => s.done).sort((a, b) => a.date.localeCompare(b.date));
@@ -673,11 +673,11 @@ export default function App() {
           const planList = pr.status === "fulfilled" ? await pr.value.json().then(d => Array.isArray(d) ? d : d.results || []).catch(() => []) : [];
           const metList  = mr.status === "fulfilled" ? await mr.value.json().then(d => Array.isArray(d) ? d : d.results || []).catch(() => []) : [];
           const map = {};
-          planList.forEach(p => { const d = (p.date || p.scheduled_date || "").slice(0, 10); const zone = (p.name||"").includes("Z3") ? 3 : (p.name||"").includes("Z2") ? 2 : 1; if (d) map[d] = { date:d, zone, planned:{ type:p.name||"Séance", duration:Math.round((p.duration_planned||0)/60), tss:p.tss_planned||0 }, done:null, compliance:null }; });
-          doneList.forEach(w => { const d = (w.date||w.start_date||"").slice(0,10); const dur = Math.round((w.duration||w.elapsed_time||0)/60); const zone = (w.name||"").includes("Z3") ? 3 : (w.name||"").includes("Z2") ? 2 : 1; if (!d) return; if (map[d]) { map[d].done = {type:w.name||"Séance",duration:dur,tss:w.tss||0}; map[d].compliance = map[d].planned.duration > 0 ? Math.round(dur/map[d].planned.duration*100) : 100; } else map[d] = {date:d,zone,planned:{type:w.name||"Séance",duration:dur,tss:w.tss||0},done:{type:w.name||"Séance",duration:dur,tss:w.tss||0},compliance:100}; });
+          planList.forEach(p => { const d = (p.date||p.scheduled_date||p.start_date||"").slice(0,10); const durRaw = p.duration_planned||p.duration||p.moving_time||p.elapsed_time||0; const dur = durRaw > 3600 ? Math.round(durRaw/60) : durRaw; const tss = p.tss_planned||p.tss||p.training_stress_score||0; const type = p.name||p.title||p.sport_type||p.type||"Séance"; const zone = type.includes("Z3")||type.includes("VO2") ? 3 : type.includes("Z2")||type.includes("seuil")||type.includes("tempo") ? 2 : 1; if (d) map[d] = {date:d,zone,planned:{type,duration:dur,tss},done:null,compliance:null}; });
+          doneList.forEach(w => { const d = (w.date||w.start_date||w.scheduled_date||"").slice(0,10); const durRaw = w.duration||w.moving_time||w.elapsed_time||0; const dur = durRaw > 3600 ? Math.round(durRaw/60) : durRaw; const tss = w.tss||w.training_stress_score||0; const type = w.name||w.title||w.sport_type||w.type||"Séance"; const zone = type.includes("Z3")||type.includes("VO2") ? 3 : type.includes("Z2")||type.includes("seuil")||type.includes("tempo") ? 2 : 1; if (!d) return; if (map[d]) { map[d].done={type,duration:dur,tss}; map[d].compliance=map[d].planned.duration>0?Math.round(dur/map[d].planned.duration*100):100; } else map[d]={date:d,zone,planned:{type,duration:dur,tss},done:{type,duration:dur,tss},compliance:100}; });
           const sessions = Object.values(map).sort((a,b) => a.date.localeCompare(b.date));
           const hoopers = metList.filter(m => m.fatigue!==undefined||m.hooper_index!==undefined).map(m => ({date:(m.date||"").slice(0,10),fatigue:m.fatigue||5,stress:m.stress||5,sleep:m.sleep_quality||m.sleep||7,doms:m.muscle_soreness||m.doms||3,mood:m.mood||7,hrv:m.hrv||null})).filter(h=>h.date).sort((a,b)=>a.date.localeCompare(b.date));
-          return { ...a, color, _hoopers: hoopers, _sessions: sessions };
+          const sport = a.sport||a.sport_type||a.discipline||a.main_sport||""; return { ...a, color, sport, _hoopers: hoopers, _sessions: sessions };
         } catch { return { ...a, color, _hoopers: [], _sessions: [] }; }
       }));
       setAthletes(enriched); setSelected(enriched[0]||null); setScreen("app");
