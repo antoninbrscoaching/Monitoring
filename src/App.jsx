@@ -81,14 +81,9 @@ const initials = a => { const fn = a.first_name||a.firstname||a.prenom||""; cons
 const fullName = a => { const fn = a.first_name||a.firstname||a.prenom||""; const ln = a.last_name||a.lastname||a.nom||""; if (fn||ln) return (fn+" "+ln).trim(); return a.username||a.name||a.email?.split("@")[0]||"Athlète"; };
 
 
-// ─── CHARGE METRICS (ACWR / RCAC) ────────────────────────────────────────────
+// ─── CHARGE METRICS : ACWR / RCAC + HRV + FORME ─────────────────────────────
 function calcCharge(sessions, hoopers) {
   const done = sessions.filter(s => s.done).sort((a, b) => a.date.localeCompare(b.date));
-
-  // CTL (Chronic Training Load) = moyenne exponentielle 42j
-  // ATL (Acute Training Load)   = moyenne exponentielle 7j
-  // ACWR = ATL / CTL  (Acute:Chronic Workload Ratio)
-  // Zone verte : 0.8–1.3 | Orange : 1.3–1.5 | Rouge : >1.5 ou <0.8
   let ctl = 0, atl = 0;
   const tssHistory = [];
   done.forEach(s => {
@@ -99,262 +94,213 @@ function calcCharge(sessions, hoopers) {
   const acwr = ctl > 0 ? Math.round((atl / ctl) * 100) / 100 : 0;
   const tsb = Math.round(ctl - atl);
 
-  // HRV trend (7 derniers jours)
-  const recentHoopers = hoopers.slice(-7);
-  const hrvValues = recentHoopers.filter(h => h.hrv).map(h => h.hrv);
-  const hrvMean = hrvValues.length ? Math.round(hrvValues.reduce((a, b) => a + b, 0) / hrvValues.length) : null;
-  const hrvTrend = hrvValues.length >= 2 ? (hrvValues[hrvValues.length - 1] - hrvValues[0] > 0 ? "up" : "down") : "stable";
+  const recentH = hoopers.slice(-7);
+  const hrvVals = recentH.filter(h => h.hrv).map(h => h.hrv);
+  const hrvMean = hrvVals.length ? Math.round(hrvVals.reduce((a, b) => a + b, 0) / hrvVals.length) : null;
+  const hrvTrend = hrvVals.length >= 2 ? (hrvVals[hrvVals.length - 1] > hrvVals[0] ? "up" : "down") : "stable";
 
-  // Hooper trend
-  const recentHS = recentHoopers.map(h => hooperScore(h)).filter(Boolean);
+  const recentHS = recentH.map(h => hooperScore(h)).filter(Boolean);
   const hsMean = recentHS.length ? Math.round(recentHS.reduce((a, b) => a + b, 0) / recentHS.length) : null;
   const hsTrend = recentHS.length >= 2 ? recentHS[recentHS.length - 1] - recentHS[0] : 0;
 
-  // État de forme global (score 0-100)
-  // Vert : fitness élevé + fatigue faible + HRV stable/haut + Hooper bas
-  // Rouge : surcharge ou sous-charge
-  let formeScore = 50;
-  if (ctl > 0) formeScore += Math.min(ctl * 0.5, 20); // fitness
-  if (tsb >= -5 && tsb <= 10) formeScore += 15;        // fraîcheur optimale
-  else if (tsb < -15) formeScore -= 20;                 // trop fatigué
-  else if (tsb > 20) formeScore -= 10;                  // désentraîné
-  if (acwr >= 0.8 && acwr <= 1.3) formeScore += 15;    // charge équilibrée
-  else if (acwr > 1.5) formeScore -= 25;                // surcharge
-  if (hsMean !== null) formeScore -= Math.max(0, (hsMean - 12) * 1.5); // fatigue subjective
-  if (hrvTrend === "up") formeScore += 10;              // HRV en hausse = récupération
-  else if (hrvTrend === "down") formeScore -= 10;
-  formeScore = Math.max(0, Math.min(100, Math.round(formeScore)));
+  let forme = 50;
+  if (ctl > 0) forme += Math.min(ctl * 0.5, 20);
+  if (tsb >= -5 && tsb <= 10) forme += 15;
+  else if (tsb < -15) forme -= 20;
+  else if (tsb > 20) forme -= 10;
+  if (acwr >= 0.8 && acwr <= 1.3) forme += 15;
+  else if (acwr > 1.5) forme -= 25;
+  if (hsMean !== null) forme -= Math.max(0, (hsMean - 12) * 1.5);
+  if (hrvTrend === "up") forme += 10;
+  else if (hrvTrend === "down") forme -= 10;
+  forme = Math.max(0, Math.min(100, Math.round(forme)));
 
-  const formeLabel = formeScore >= 75 ? "Optimal" : formeScore >= 50 ? "Bon" : formeScore >= 30 ? "Attention" : "Surcharge";
-  const formeColor = formeScore >= 75 ? "#43e97b" : formeScore >= 50 ? "#00e5ff" : formeScore >= 30 ? "#f7971e" : "#ff6b6b";
-
-  // ACWR status
+  const formeLabel = forme >= 75 ? "Optimal" : forme >= 50 ? "Bon" : forme >= 30 ? "Attention" : "Surcharge";
+  const formeColor = forme >= 75 ? "#43e97b" : forme >= 50 ? "#00e5ff" : forme >= 30 ? "#f7971e" : "#ff6b6b";
   const acwrStatus = acwr === 0 ? { label: "Pas de données", color: "rgba(255,255,255,0.3)" }
     : acwr < 0.8 ? { label: "Sous-charge", color: "#f7971e" }
     : acwr <= 1.3 ? { label: "Zone verte ✦", color: "#43e97b" }
     : acwr <= 1.5 ? { label: "Zone orange", color: "#f7971e" }
     : { label: "Surcharge ⚠", color: "#ff6b6b" };
 
-  return {
-    ctl: Math.round(ctl), atl: Math.round(atl), tsb, acwr, tssHistory,
-    hrvMean, hrvTrend, hsMean, hsTrend,
-    formeScore, formeLabel, formeColor, acwrStatus
-  };
+  return { ctl: Math.round(ctl), atl: Math.round(atl), tsb, acwr, tssHistory, hrvMean, hrvTrend, hsMean, hsTrend, formeScore: forme, formeLabel, formeColor, acwrStatus };
 }
 
-// ─── CHARGE DASHBOARD PANEL ──────────────────────────────────────────────────
 function ChargeDashboard({ athlete, sessions, hoopers, color }) {
-  const {
-    ctl, atl, tsb, acwr, tssHistory,
-    hrvMean, hrvTrend, hsMean, hsTrend,
-    formeScore, formeLabel, formeColor, acwrStatus
-  } = calcCharge(sessions, hoopers);
-
+  const { ctl, atl, tsb, acwr, tssHistory, hrvMean, hrvTrend, hsMean, hsTrend, formeScore, formeLabel, formeColor, acwrStatus } = calcCharge(sessions, hoopers);
   const tsbC = tsb > 5 ? "#43e97b" : tsb < -10 ? "#ff6b6b" : "#f7971e";
-  const tssLast7 = tssHistory.slice(-7).map(t => t.tss);
-  const ctlLast28 = tssHistory.slice(-28).map(t => t.ctl);
   const latest = hoopers[hoopers.length - 1];
   const hs = hooperScore(latest);
 
-  // Gauge SVG for forme score
-  function Gauge({ score, color: gc }) {
-    const r = 44, cx = 56, cy = 56;
+  function Gauge({ score, gc }) {
+    const r = 44, cx = 56, cy = 58;
+    const toRad = d => d * Math.PI / 180;
     const startAng = -210, sweep = 240;
     const ang = startAng + (score / 100) * sweep;
-    const toRad = d => d * Math.PI / 180;
-    const arcX = (a) => cx + r * Math.cos(toRad(a));
-    const arcY = (a) => cy + r * Math.sin(toRad(a));
-    const largeArc = (score / 100) * sweep > 180 ? 1 : 0;
+    const ax = (a) => cx + r * Math.cos(toRad(a));
+    const ay = (a) => cy + r * Math.sin(toRad(a));
+    const la = (score / 100) * sweep > 180 ? 1 : 0;
     return (
-      <svg width={112} height={80} viewBox="0 0 112 80">
-        <path d={`M ${arcX(startAng)} ${arcY(startAng)} A ${r} ${r} 0 1 1 ${arcX(startAng + sweep)} ${arcY(startAng + sweep)}`}
-          fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="8" strokeLinecap="round" />
-        {score > 0 && <path d={`M ${arcX(startAng)} ${arcY(startAng)} A ${r} ${r} 0 ${largeArc} 1 ${arcX(ang)} ${arcY(ang)}`}
-          fill="none" stroke={gc} strokeWidth="8" strokeLinecap="round" />}
-        <text x={cx} y={cy - 4} textAnchor="middle" fill={gc} fontSize="18" fontWeight="800">{score}</text>
-        <text x={cx} y={cy + 12} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="8">/100</text>
+      <svg width={112} height={82} viewBox="0 0 112 82">
+        <path d={`M ${ax(startAng)} ${ay(startAng)} A ${r} ${r} 0 1 1 ${ax(startAng + sweep)} ${ay(startAng + sweep)}`} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="8" strokeLinecap="round" />
+        {score > 0 && <path d={`M ${ax(startAng)} ${ay(startAng)} A ${r} ${r} 0 ${la} 1 ${ax(ang)} ${ay(ang)}`} fill="none" stroke={gc} strokeWidth="8" strokeLinecap="round" />}
+        <text x={cx} y={cy - 6} textAnchor="middle" fill={gc} fontSize="18" fontWeight="800">{score}</text>
+        <text x={cx} y={cy + 10} textAnchor="middle" fill="rgba(255,255,255,0.38)" fontSize="8">/100</text>
       </svg>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
-      {/* Ligne 1 : État de forme global */}
-      <div style={{ background: `linear-gradient(135deg, ${formeColor}12, rgba(255,255,255,0.02))`, border: `1px solid ${formeColor}33`, borderRadius: 14, padding: "16px 20px", display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 20, alignItems: "center" }}>
-        <Gauge score={formeScore} color={formeColor} />
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* État de forme global */}
+      <div style={{ background: `linear-gradient(135deg,${formeColor}10,rgba(255,255,255,0.02))`, border: `1px solid ${formeColor}33`, borderRadius: 14, padding: "14px 18px", display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 16, alignItems: "center" }}>
+        <Gauge score={formeScore} gc={formeColor} />
         <div>
-          <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>État de forme global</div>
-          <div style={{ color: formeColor, fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{formeLabel}</div>
-          <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, lineHeight: 1.6 }}>
-            Croisant ACWR ({acwr.toFixed(2)}), TSB ({tsb > 0 ? "+" : ""}{tsb}),
-            Hooper ({hsMean ?? "—"}/32) et HRV ({hrvMean ? hrvMean + "ms" : "—"})
-          </div>
+          <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>État de forme global</div>
+          <div style={{ color: formeColor, fontSize: 20, fontWeight: 800, marginBottom: 4 }}>{formeLabel}</div>
+          <div style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, lineHeight: 1.6 }}>ACWR {acwr.toFixed(2)} · TSB {tsb > 0 ? "+" : ""}{tsb} · Hooper {hsMean ?? "—"}/32 · HRV {hrvMean ? hrvMean + "ms" : "—"}</div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ background: acwrStatus.color + "20", border: `1px solid ${acwrStatus.color}44`, borderRadius: 10, padding: "6px 12px", marginBottom: 6 }}>
-            <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, textTransform: "uppercase", letterSpacing: 1 }}>ACWR</div>
-            <div style={{ color: acwrStatus.color, fontSize: 18, fontWeight: 800 }}>{acwr.toFixed(2)}</div>
-            <div style={{ color: acwrStatus.color, fontSize: 9, fontWeight: 700 }}>{acwrStatus.label}</div>
-          </div>
+        <div style={{ background: acwrStatus.color + "18", border: `1px solid ${acwrStatus.color}44`, borderRadius: 10, padding: "8px 12px", textAlign: "center", minWidth: 90 }}>
+          <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, textTransform: "uppercase", letterSpacing: 1, marginBottom: 3 }}>ACWR</div>
+          <div style={{ color: acwrStatus.color, fontSize: 20, fontWeight: 800 }}>{acwr.toFixed(2)}</div>
+          <div style={{ color: acwrStatus.color, fontSize: 9, fontWeight: 700 }}>{acwrStatus.label}</div>
         </div>
       </div>
 
-      {/* Ligne 2 : CTL / ATL / TSB / ACWR */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+      {/* CTL / ATL / TSB / ACWR */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
         {[
-          { l: "CTL", v: ctl, c: color, sub: "Charge chronique (42j)", tip: "Fitness de base accumulé" },
-          { l: "ATL", v: atl, c: "#ff6b6b", sub: "Charge aiguë (7j)", tip: "Fatigue récente" },
-          { l: "TSB", v: (tsb >= 0 ? "+" : "") + tsb, c: tsbC, sub: tsb > 5 ? "Frais" : tsb < -10 ? "Fatigué" : "Équilibré", tip: "Fraîcheur = CTL - ATL" },
-          { l: "ACWR", v: acwr.toFixed(2), c: acwrStatus.color, sub: acwrStatus.label, tip: "Ratio charge aiguë / chronique" },
+          { l: "CTL", v: ctl, c: color, s: "Fitness chronique (42j)" },
+          { l: "ATL", v: atl, c: "#ff6b6b", s: "Fatigue aiguë (7j)" },
+          { l: "TSB", v: (tsb >= 0 ? "+" : "") + tsb, c: tsbC, s: tsb > 5 ? "Frais" : tsb < -10 ? "Fatigué" : "Équilibré" },
+          { l: "ACWR", v: acwr.toFixed(2), c: acwrStatus.color, s: acwrStatus.label },
         ].map((k, i) => (
-          <div key={i} title={k.tip} style={{ background: `${k.c}0d`, border: `1px solid ${k.c}22`, borderRadius: 11, padding: "12px 10px", textAlign: "center" }}>
-            <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{k.l}</div>
-            <div style={{ color: k.c, fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{k.v}</div>
-            <div style={{ color: "rgba(255,255,255,0.28)", fontSize: 9, marginTop: 3 }}>{k.sub}</div>
+          <div key={i} style={{ background: `${k.c}0d`, border: `1px solid ${k.c}22`, borderRadius: 10, padding: "11px 8px", textAlign: "center" }}>
+            <div style={{ color: "rgba(255,255,255,0.33)", fontSize: 9, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>{k.l}</div>
+            <div style={{ color: k.c, fontSize: 19, fontWeight: 800 }}>{k.v}</div>
+            <div style={{ color: "rgba(255,255,255,0.28)", fontSize: 9, marginTop: 2 }}>{k.s}</div>
           </div>
         ))}
       </div>
 
-      {/* Ligne 3 : Hooper + HRV */}
+      {/* Hooper 7j + HRV 7j */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        {/* Hooper 7j */}
-        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "13px 15px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div>
-              <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>Index de Hooper · 7j</div>
-              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                <span style={{ color: hs ? hooperStatus(hs).color : "rgba(255,255,255,0.3)", fontSize: 22, fontWeight: 800 }}>{hs ?? "—"}</span>
-                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>/32 aujourd'hui</span>
+              <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>Hooper · 7j</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+                <span style={{ color: hs ? hooperStatus(hs).color : "rgba(255,255,255,0.3)", fontSize: 20, fontWeight: 800 }}>{hs ?? "—"}</span>
+                <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 9 }}>/32 auj.</span>
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9 }}>Moy. 7j</div>
-              <div style={{ color: hsMean ? hooperStatus(hsMean).color : "rgba(255,255,255,0.3)", fontSize: 16, fontWeight: 700 }}>{hsMean ?? "—"}</div>
-              <div style={{ fontSize: 10, color: hsTrend > 2 ? "#ff6b6b" : hsTrend < -2 ? "#43e97b" : "#f7971e" }}>
+              <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9 }}>Moy. 7j</div>
+              <div style={{ color: hsMean ? hooperStatus(hsMean).color : "rgba(255,255,255,0.3)", fontSize: 15, fontWeight: 700 }}>{hsMean ?? "—"}</div>
+              <div style={{ fontSize: 9, color: hsTrend > 2 ? "#ff6b6b" : hsTrend < -2 ? "#43e97b" : "#f7971e" }}>
                 {hsTrend > 2 ? "↑ Fatigue croissante" : hsTrend < -2 ? "↓ Récupération" : "→ Stable"}
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {hoopers.slice(-7).map((h, i) => {
-              const s = hooperScore(h); const sc = hooperStatus(s).color;
-              return (
-                <div key={i} style={{ display: "grid", gridTemplateColumns: "45px 1fr 20px", gap: 6, alignItems: "center" }}>
-                  <span style={{ color: "rgba(255,255,255,0.35)", fontSize: 9 }}>{h.date.slice(5)}</span>
-                  <div style={{ height: 4, background: "rgba(255,255,255,0.05)", borderRadius: 3 }}>
-                    <div style={{ height: "100%", width: (s / 32 * 100) + "%", background: sc, borderRadius: 3 }} />
-                  </div>
-                  <span style={{ color: sc, fontSize: 9, fontWeight: 700, textAlign: "right" }}>{s}</span>
+          {hoopers.slice(-7).map((h, i) => {
+            const s = hooperScore(h); const sc = hooperStatus(s).color;
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "40px 1fr 18px", gap: 5, alignItems: "center", marginBottom: 4 }}>
+                <span style={{ color: "rgba(255,255,255,0.32)", fontSize: 9 }}>{h.date.slice(5)}</span>
+                <div style={{ height: 4, background: "rgba(255,255,255,0.05)", borderRadius: 3 }}>
+                  <div style={{ height: "100%", width: (s / 32 * 100) + "%", background: sc, borderRadius: 3 }} />
                 </div>
-              );
-            })}
-          </div>
+                <span style={{ color: sc, fontSize: 9, fontWeight: 700 }}>{s}</span>
+              </div>
+            );
+          })}
         </div>
 
-        {/* HRV 7j */}
-        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "13px 15px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div>
-              <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>HRV · 7 jours</div>
-              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                <span style={{ color: latest?.hrv ? color : "rgba(255,255,255,0.3)", fontSize: 22, fontWeight: 800 }}>{latest?.hrv ?? "—"}</span>
-                <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 10 }}>ms aujourd'hui</span>
+              <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>HRV · 7j</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
+                <span style={{ color: latest?.hrv ? color : "rgba(255,255,255,0.3)", fontSize: 20, fontWeight: 800 }}>{latest?.hrv ?? "—"}</span>
+                <span style={{ color: "rgba(255,255,255,0.28)", fontSize: 9 }}>ms auj.</span>
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9 }}>Moy. 7j</div>
-              <div style={{ color: color, fontSize: 16, fontWeight: 700 }}>{hrvMean ?? "—"}<span style={{ fontSize: 9, color: "rgba(255,255,255,0.3)" }}> ms</span></div>
-              <div style={{ fontSize: 10, color: hrvTrend === "up" ? "#43e97b" : hrvTrend === "down" ? "#ff6b6b" : "#f7971e" }}>
+              <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9 }}>Moy. 7j</div>
+              <div style={{ color: color, fontSize: 15, fontWeight: 700 }}>{hrvMean ?? "—"}<span style={{ fontSize: 9, color: "rgba(255,255,255,0.28)" }}> ms</span></div>
+              <div style={{ fontSize: 9, color: hrvTrend === "up" ? "#43e97b" : hrvTrend === "down" ? "#ff6b6b" : "#f7971e" }}>
                 {hrvTrend === "up" ? "↑ Récupération" : hrvTrend === "down" ? "↓ Vigilance" : "→ Stable"}
               </div>
             </div>
           </div>
-          {hoopers.some(h => h.hrv) ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {hoopers.slice(-7).map((h, i) => {
-                const max = Math.max(...hoopers.slice(-7).filter(x => x.hrv).map(x => x.hrv), 1);
-                const min = Math.min(...hoopers.slice(-7).filter(x => x.hrv).map(x => x.hrv), 0);
-                const pct = h.hrv ? ((h.hrv - min) / (max - min + 1)) * 100 : 0;
-                const c = h.hrv > (hrvMean || 0) ? "#43e97b" : "#ff6b6b";
-                return (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "45px 1fr 30px", gap: 6, alignItems: "center" }}>
-                    <span style={{ color: "rgba(255,255,255,0.35)", fontSize: 9 }}>{h.date.slice(5)}</span>
-                    <div style={{ height: 4, background: "rgba(255,255,255,0.05)", borderRadius: 3 }}>
-                      <div style={{ height: "100%", width: pct + "%", background: h.hrv ? c : "rgba(255,255,255,0.1)", borderRadius: 3 }} />
-                    </div>
-                    <span style={{ color: h.hrv ? c : "rgba(255,255,255,0.2)", fontSize: 9, fontWeight: 700, textAlign: "right" }}>{h.hrv ?? "—"}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={{ textAlign: "center", padding: "16px 0", color: "rgba(255,255,255,0.25)", fontSize: 11 }}>
-              HRV non renseigné dans Hooper<br />
-              <span style={{ fontSize: 10 }}>Utilisez le bouton "+ Hooper" pour saisir</span>
+          {hoopers.some(h => h.hrv) ? hoopers.slice(-7).map((h, i) => {
+            const vals = hoopers.slice(-7).filter(x => x.hrv).map(x => x.hrv);
+            const mx = Math.max(...vals, 1), mn = Math.min(...vals, 0);
+            const pct = h.hrv ? ((h.hrv - mn) / (mx - mn + 1)) * 100 : 0;
+            const c = h.hrv >= (hrvMean || 0) ? "#43e97b" : "#ff6b6b";
+            return (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "40px 1fr 28px", gap: 5, alignItems: "center", marginBottom: 4 }}>
+                <span style={{ color: "rgba(255,255,255,0.32)", fontSize: 9 }}>{h.date.slice(5)}</span>
+                <div style={{ height: 4, background: "rgba(255,255,255,0.05)", borderRadius: 3 }}>
+                  <div style={{ height: "100%", width: pct + "%", background: h.hrv ? c : "rgba(255,255,255,0.1)", borderRadius: 3 }} />
+                </div>
+                <span style={{ color: h.hrv ? c : "rgba(255,255,255,0.2)", fontSize: 9, fontWeight: 700 }}>{h.hrv ?? "—"}</span>
+              </div>
+            );
+          }) : (
+            <div style={{ textAlign: "center", padding: "14px 0", color: "rgba(255,255,255,0.22)", fontSize: 10 }}>
+              Saisissez le HRV via<br />le bouton "+ Hooper"
             </div>
           )}
         </div>
       </div>
 
-      {/* Ligne 4 : TSS 7 derniers jours */}
-      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
-        <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Charge d'entraînement TSS · 28 derniers jours</div>
+      {/* TSS 28j histogramme */}
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "13px 15px" }}>
+        <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Charge TSS · 28 derniers jours</div>
         {tssHistory.length === 0 ? (
-          <div style={{ textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: 11, padding: "12px 0" }}>Aucune séance réalisée sur la période</div>
+          <div style={{ textAlign: "center", color: "rgba(255,255,255,0.22)", fontSize: 11, padding: "10px 0" }}>Aucune séance sur la période</div>
         ) : (
           <div>
-            <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 50, marginBottom: 6 }}>
+            <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 48, marginBottom: 5 }}>
               {tssHistory.slice(-28).map((t, i) => {
-                const maxTss = Math.max(...tssHistory.slice(-28).map(x => x.tss), 1);
-                const h = Math.max(3, (t.tss / maxTss) * 50);
-                const c = t.tss > (atl * 1.5) ? "#ff6b6b" : t.tss > atl ? "#f7971e" : "#43e97b";
-                return (
-                  <div key={i} title={`${t.date}: TSS ${t.tss}`}
-                    style={{ flex: 1, height: h + "px", background: c, borderRadius: "2px 2px 0 0", opacity: 0.8, cursor: "pointer", transition: "opacity 0.2s" }}
-                    onMouseEnter={e => e.target.style.opacity = 1}
-                    onMouseLeave={e => e.target.style.opacity = 0.8} />
-                );
+                const mx = Math.max(...tssHistory.slice(-28).map(x => x.tss), 1);
+                const h = Math.max(3, (t.tss / mx) * 48);
+                const c = t.tss > atl * 1.5 ? "#ff6b6b" : t.tss > atl ? "#f7971e" : "#43e97b";
+                return <div key={i} title={`${t.date}: TSS ${t.tss}`} style={{ flex: 1, height: h + "px", background: c, borderRadius: "2px 2px 0 0", opacity: 0.75, cursor: "pointer", transition: "opacity 0.15s" }} onMouseEnter={e => e.target.style.opacity = 1} onMouseLeave={e => e.target.style.opacity = 0.75} />;
               })}
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 9 }}>il y a 28j</span>
-              <div style={{ display: "flex", gap: 12 }}>
-                <span style={{ color: "#43e97b", fontSize: 9 }}>■ Normal (&lt;ATL)</span>
-                <span style={{ color: "#f7971e", fontSize: 9 }}>■ Élevé</span>
-                <span style={{ color: "#ff6b6b", fontSize: 9 }}>■ Très élevé (&gt;1.5×ATL)</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ color: "rgba(255,255,255,0.22)", fontSize: 9 }}>−28j</span>
+              <div style={{ display: "flex", gap: 10 }}>
+                {[["#43e97b", "Normal"], ["#f7971e", "Élevé"], ["#ff6b6b", "Surcharge"]].map(([c, l]) => <span key={l} style={{ color: "rgba(255,255,255,0.35)", fontSize: 9 }}><span style={{ color: c }}>■</span> {l}</span>)}
               </div>
-              <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 9 }}>aujourd'hui</span>
+              <span style={{ color: "rgba(255,255,255,0.22)", fontSize: 9 }}>auj.</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Ligne 5 : Zone ACWR visuelle */}
-      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
-        <div style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Modèle ACWR — Zone de charge optimale</div>
-        <div style={{ position: "relative", height: 24, borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
-          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, #f7971e 0%, #43e97b 32%, #43e97b 52%, #f7971e 60%, #ff6b6b 72%, #ff6b6b 100%)" }} />
-          {acwr > 0 && (
-            <div style={{ position: "absolute", top: 0, bottom: 0, width: 3, background: "white", borderRadius: 2, left: Math.min(95, Math.max(2, (acwr / 2) * 100)) + "%", boxShadow: "0 0 6px white" }} />
-          )}
+      {/* Barre ACWR */}
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "13px 15px" }}>
+        <div style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>Modèle ACWR — Zone de charge optimale</div>
+        <div style={{ position: "relative", height: 20, borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, #f7971e 0%, #43e97b 30%, #43e97b 52%, #f7971e 60%, #ff6b6b 70%, #ff6b6b 100%)" }} />
+          {acwr > 0 && <div style={{ position: "absolute", top: 0, bottom: 0, width: 3, background: "white", borderRadius: 2, left: Math.min(96, Math.max(2, (acwr / 2) * 100)) + "%", boxShadow: "0 0 6px white" }} />}
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "rgba(255,255,255,0.35)" }}>
-          <span>0.0<br /><span style={{ color: "#f7971e" }}>Sous-charge</span></span>
-          <span style={{ textAlign: "center" }}>0.8<br /><span style={{ color: "#43e97b" }}>↑ Zone verte ↑</span></span>
-          <span style={{ textAlign: "center" }}>1.3<br /><span style={{ color: "#f7971e" }}>Attention</span></span>
-          <span style={{ textAlign: "right" }}>1.5+<br /><span style={{ color: "#ff6b6b" }}>Surcharge</span></span>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "rgba(255,255,255,0.32)", marginBottom: 8 }}>
+          <span>0.0 <span style={{ color: "#f7971e" }}>Sous-charge</span></span>
+          <span>0.8–1.3 <span style={{ color: "#43e97b" }}>Zone optimale</span></span>
+          <span>1.5+ <span style={{ color: "#ff6b6b" }}>Surcharge</span></span>
         </div>
         {acwr > 0 && (
-          <div style={{ marginTop: 10, padding: "8px 12px", background: acwrStatus.color + "12", border: `1px solid ${acwrStatus.color}33`, borderRadius: 8 }}>
-            <span style={{ color: acwrStatus.color, fontSize: 11, fontWeight: 700 }}>
-              ACWR actuel : {acwr.toFixed(2)} — {acwrStatus.label}
-            </span>
-            <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 10, marginLeft: 8 }}>
-              {acwr < 0.8 ? "Augmentez progressivement la charge (+10% max par semaine)" :
-               acwr <= 1.3 ? "Continuez sur cette lancée, charge bien équilibrée" :
+          <div style={{ padding: "8px 12px", background: acwrStatus.color + "10", border: `1px solid ${acwrStatus.color}33`, borderRadius: 8 }}>
+            <span style={{ color: acwrStatus.color, fontSize: 11, fontWeight: 700 }}>ACWR {acwr.toFixed(2)} — {acwrStatus.label}  </span>
+            <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 10 }}>
+              {acwr < 0.8 ? "Augmentez progressivement la charge (+10% max/semaine)" :
+               acwr <= 1.3 ? "Charge bien équilibrée, continuez sur cette lancée" :
                acwr <= 1.5 ? "Surveillez la récupération, réduisez les séances Z3" :
-               "Réduisez la charge immédiatement, risque de blessure élevé"}
+               "Réduisez la charge immédiatement — risque de blessure élevé"}
             </span>
           </div>
         )}
@@ -726,7 +672,7 @@ function AthleteCard({ athlete, selected, onClick, onHooper }) {
   const color = athlete.color || "#00e5ff";
   const hoopers = athlete._hoopers || [], latest = hoopers[hoopers.length - 1];
   const hs = hooperScore(latest), st = hs !== null ? hooperStatus(hs) : null;
-  const { ctl, tsb, acwr, formeScore, formeColor, acwrStatus } = calcCharge(athlete._sessions || [], athlete._hoopers || []);
+  const { ctl, tsb, acwr, acwrStatus, formeScore, formeColor } = calcCharge(athlete._sessions || [], athlete._hoopers || []);
   const tsbC = tsb > 5 ? "#43e97b" : tsb < -10 ? "#ff6b6b" : "#f7971e";
   return (
     <div onClick={onClick} style={{ background: selected ? `linear-gradient(135deg,${color}12,${color}06)` : "#161b22", border: `1px solid ${selected ? color + "55" : "rgba(255,255,255,0.07)"}`, borderRadius: 15, padding: "14px 16px", cursor: "pointer", transition: "all 0.18s", position: "relative", overflow: "hidden" }}>
@@ -739,16 +685,12 @@ function AthleteCard({ athlete, selected, onClick, onHooper }) {
         {st && <div style={{ background: st.color + "1a", border: `1px solid ${st.color}44`, borderRadius: 20, padding: "2px 8px", display: "flex", gap: 3, alignItems: "center" }}><span style={{ fontSize: 8 }}>{st.icon}</span><span style={{ color: st.color, fontSize: 9, fontWeight: 700 }}>{st.label}</span></div>}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
           {hs !== null && <div><div style={{ color: "rgba(255,255,255,0.28)", fontSize: 9 }}>Hooper</div><div style={{ color: hooperStatus(hs).color, fontSize: 19, fontWeight: 800, lineHeight: 1 }}>{hs}</div></div>}
           <div><div style={{ color: "rgba(255,255,255,0.28)", fontSize: 9 }}>CTL</div><div style={{ color: "rgba(255,255,255,0.72)", fontSize: 14, fontWeight: 700 }}>{ctl}</div></div>
           <div><div style={{ color: "rgba(255,255,255,0.28)", fontSize: 9 }}>ACWR</div><div style={{ color: acwrStatus.color, fontSize: 14, fontWeight: 700 }}>{acwr.toFixed(2)}</div></div>
           <div><div style={{ color: "rgba(255,255,255,0.28)", fontSize: 9 }}>Forme</div><div style={{ color: formeColor, fontSize: 14, fontWeight: 700 }}>{formeScore}%</div></div>
         </div>
-
-
-
-
         <button onClick={e => { e.stopPropagation(); onHooper(athlete); }} style={{ background: color + "15", border: `1px solid ${color}44`, borderRadius: 7, padding: "3px 9px", color, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>+ Hooper</button>
       </div>
     </div>
