@@ -781,8 +781,8 @@ function AthleteDetail({ athlete, onAnalyze }) {
                   return <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 9, padding: "9px 12px", display: "grid", gridTemplateColumns: "55px 10px 1fr 1fr 62px", gap: 8, alignItems: "center" }}>
                     <span style={{ color: "rgba(255,255,255,0.33)", fontSize: 10 }}>{s.date.slice(5)}</span>
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: zc }} title={`Z${s.zone}`} />
-                    <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Prévu</div><div style={{ color: "white", fontSize: 11, fontWeight: 600 }}>{s.planned.type}</div><div style={{ color: "rgba(255,255,255,0.32)", fontSize: 9 }}>{s.planned.duration}min · TSS {s.planned.tss}</div></div>
-                    <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Réalisé</div>{s.done?<><div style={{color:"white",fontSize:11,fontWeight:600}}>{s.done.type}</div><div style={{color:"rgba(255,255,255,0.32)",fontSize:9}}>{s.done.duration}min · TSS {s.done.tss}</div></>:s.compliance===null?<div style={{color:"rgba(255,255,255,0.22)",fontSize:10}}>À venir</div>:<div style={{color:"#ff6b6b",fontSize:10}}>Non réalisé</div>}</div>
+                    <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Prévu</div><div style={{ color: "white", fontSize: 11, fontWeight: 600 }}>{s.planned.type}</div><div style={{ color: "rgba(255,255,255,0.32)", fontSize: 9 }}>{s.planned.duration > 0 ? s.planned.duration + "min" : "—"} {s.planned.tss > 0 ? "· TSS " + s.planned.tss : ""} {s.planned.rpe ? "· RPE " + s.planned.rpe : ""}</div></div>
+                    <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Réalisé</div>{s.done?<><div style={{color:"white",fontSize:11,fontWeight:600}}>{s.done.type}</div><div style={{color:"rgba(255,255,255,0.32)",fontSize:9}}>{s.done.duration > 0 ? s.done.duration + "min" : "—"} {s.done.tss > 0 ? "· TSS " + s.done.tss : ""} {s.done.rpe ? <span style={{color:"#f7971e",fontWeight:700}}>{"· RPE " + s.done.rpe}</span> : ""}</div></>:s.compliance===null?<div style={{color:"rgba(255,255,255,0.22)",fontSize:10}}>À venir</div>:<div style={{color:"#ff6b6b",fontSize:10}}>Non réalisé</div>}</div>
                     {s.compliance !== null && <div style={{ background: cc + "1a", border: `1px solid ${cc}44`, borderRadius: 6, padding: "3px 7px", color: cc, fontSize: 10, fontWeight: 700, textAlign: "center" }}>{s.compliance === 0 ? "✗" : s.compliance + "%"}</div>}
                   </div>;
                 })}
@@ -888,10 +888,38 @@ export default function App() {
       const ad = await ar.json();
       const list = Array.isArray(ad) ? ad : (ad.results || ad.athletes || []);
       setLoadMsg("Chargement des données (" + list.length + " athlètes)...");
+
+      // Fenêtre large : 90j passés + 30j futurs
       const today = new Date();
-      const after = new Date(today); after.setDate(today.getDate() - 28);
+      const after = new Date(today); after.setDate(today.getDate() - 90);
+      const future = new Date(today); future.setDate(today.getDate() + 30);
       const afterStr = after.toISOString().slice(0, 10);
-      const beforeStr = today.toISOString().slice(0, 10);
+      const beforeStr = future.toISOString().slice(0, 10);
+
+      // On charge seulement le 1er athlète en détail pour diagnostiquer le format
+      const firstAthlete = list[0];
+      if (firstAthlete) {
+        const [wr, pr, mr] = await Promise.allSettled([
+          fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + firstAthlete.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+          fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + firstAthlete.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+          fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + firstAthlete.id, { headers }),
+        ]);
+        const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
+        const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
+        const rawMet  = mr.status === "fulfilled" ? await mr.value.json().catch(() => []) : [];
+        // Stocker le diagnostic pour affichage
+        localStorage.setItem("nolio_debug", JSON.stringify({
+          athleteId: firstAthlete.id,
+          athleteKeys: Object.keys(firstAthlete),
+          doneCount: (Array.isArray(rawDone) ? rawDone : rawDone.results || []).length,
+          planCount: (Array.isArray(rawPlan) ? rawPlan : rawPlan.results || []).length,
+          metCount: (Array.isArray(rawMet) ? rawMet : rawMet.results || []).length,
+          firstDone: (Array.isArray(rawDone) ? rawDone : rawDone.results || [])[0] || null,
+          firstPlan: (Array.isArray(rawPlan) ? rawPlan : rawPlan.results || [])[0] || null,
+          firstMet: (Array.isArray(rawMet) ? rawMet : rawMet.results || [])[0] || null,
+        }));
+      }
+
       const enriched = await Promise.all(list.map(async (a, idx) => {
         const color = COLORS[idx % COLORS.length];
         try {
@@ -900,19 +928,88 @@ export default function App() {
             fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + a.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
             fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + a.id, { headers }),
           ]);
-          const doneList = wr.status === "fulfilled" ? await wr.value.json().then(d => Array.isArray(d) ? d : d.results || []).catch(() => []) : [];
-          const planList = pr.status === "fulfilled" ? await pr.value.json().then(d => Array.isArray(d) ? d : d.results || []).catch(() => []) : [];
-          const metList  = mr.status === "fulfilled" ? await mr.value.json().then(d => Array.isArray(d) ? d : d.results || []).catch(() => []) : [];
+          const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
+          const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
+          const rawMet  = mr.status === "fulfilled" ? await mr.value.json().catch(() => []) : [];
+          const doneList = Array.isArray(rawDone) ? rawDone : (rawDone.results || rawDone.trainings || []);
+          const planList = Array.isArray(rawPlan) ? rawPlan : (rawPlan.results || rawPlan.trainings || []);
+          const metList  = Array.isArray(rawMet)  ? rawMet  : (rawMet.results  || rawMet.metrics   || []);
+
+          // Parsing séances réalisées
           const map = {};
-          planList.forEach(p => { const d = (p.date||p.scheduled_date||p.start_date||"").slice(0,10); const durRaw = p.duration_planned||p.duration||p.moving_time||p.elapsed_time||0; const dur = durRaw > 3600 ? Math.round(durRaw/60) : durRaw; const tss = p.tss_planned||p.tss||p.training_stress_score||0; const type = p.name||p.title||p.sport_type||p.type||"Séance"; const zone = type.includes("Z3")||type.includes("VO2") ? 3 : type.includes("Z2")||type.includes("seuil")||type.includes("tempo") ? 2 : 1; if (d) map[d] = {date:d,zone,planned:{type,duration:dur,tss},done:null,compliance:null}; });
-          doneList.forEach(w => { const d = (w.date||w.start_date||w.scheduled_date||"").slice(0,10); const durRaw = w.duration||w.moving_time||w.elapsed_time||0; const dur = durRaw > 3600 ? Math.round(durRaw/60) : durRaw; const tss = w.tss||w.training_stress_score||0; const type = w.name||w.title||w.sport_type||w.type||"Séance"; const zone = type.includes("Z3")||type.includes("VO2") ? 3 : type.includes("Z2")||type.includes("seuil")||type.includes("tempo") ? 2 : 1; if (!d) return; if (map[d]) { map[d].done={type,duration:dur,tss}; map[d].compliance=map[d].planned.duration>0?Math.round(dur/map[d].planned.duration*100):100; } else map[d]={date:d,zone,planned:{type,duration:dur,tss},done:{type,duration:dur,tss},compliance:100}; });
-          const sessions = Object.values(map).sort((a,b) => a.date.localeCompare(b.date));
-          const hoopers = metList.filter(m => m.fatigue!==undefined||m.hooper_index!==undefined).map(m => ({date:(m.date||"").slice(0,10),fatigue:m.fatigue||5,stress:m.stress||5,sleep:m.sleep_quality||m.sleep||7,doms:m.muscle_soreness||m.doms||3,mood:m.mood||7,hrv:m.hrv||null})).filter(h=>h.date).sort((a,b)=>a.date.localeCompare(b.date));
-          const sport = a.sport||a.sport_type||a.discipline||a.main_sport||""; return { ...a, color, sport, _hoopers: hoopers, _sessions: sessions };
-        } catch { return { ...a, color, _hoopers: [], _sessions: [] }; }
+          planList.forEach(p => {
+            const d = (p.date || p.scheduled_date || p.start_date || p.planned_date || "").slice(0, 10);
+            if (!d) return;
+            // Durée : Nolio stocke en secondes si > 3600, sinon en minutes
+            const durRaw = p.duration_planned || p.planned_duration || p.duration || p.moving_time || p.elapsed_time || 0;
+            const dur = durRaw >= 3600 ? Math.round(durRaw / 60) : (durRaw > 0 ? durRaw : 0);
+            const tss = p.tss_planned || p.planned_tss || p.tss || p.training_stress_score || 0;
+            const rpe = p.rpe_planned || p.rpe || null;
+            const type = p.name || p.title || p.workout_type || p.sport || p.sport_type || p.type || "Séance";
+            const zone = p.zone || (type.toLowerCase().includes("z3") || type.toLowerCase().includes("vo2") || type.toLowerCase().includes("fractionné") ? 3 : type.toLowerCase().includes("z2") || type.toLowerCase().includes("seuil") || type.toLowerCase().includes("tempo") ? 2 : 1);
+            map[d] = { date: d, zone, planned: { type, duration: dur, tss, rpe }, done: null, compliance: null };
+          });
+
+          doneList.forEach(w => {
+            const d = (w.date || w.start_date || w.scheduled_date || "").slice(0, 10);
+            if (!d) return;
+            const durRaw = w.duration || w.moving_time || w.elapsed_time || w.total_duration || 0;
+            const dur = durRaw >= 3600 ? Math.round(durRaw / 60) : (durRaw > 0 ? durRaw : 0);
+            const tss = w.tss || w.training_stress_score || w.tss_actual || 0;
+            const rpe = w.rpe || w.perceived_exertion || w.rpe_actual || null;
+            const type = w.name || w.title || w.sport || w.sport_type || w.workout_type || w.type || "Séance";
+            const zone = w.zone || (type.toLowerCase().includes("z3") || type.toLowerCase().includes("vo2") || type.toLowerCase().includes("fractionné") ? 3 : type.toLowerCase().includes("z2") || type.toLowerCase().includes("seuil") || type.toLowerCase().includes("tempo") ? 2 : 1);
+            if (map[d]) {
+              map[d].done = { type, duration: dur, tss, rpe };
+              map[d].compliance = map[d].planned.duration > 0 ? Math.round(dur / map[d].planned.duration * 100) : 100;
+            } else {
+              map[d] = { date: d, zone, planned: { type, duration: dur, tss, rpe }, done: { type, duration: dur, tss, rpe }, compliance: 100 };
+            }
+          });
+
+          const sessions = Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+
+          // Parsing Hooper — Nolio peut utiliser différents noms de champs
+          const hoopers = metList.map(m => {
+            // Chercher les valeurs Hooper dans tous les champs possibles
+            const fatigue = m.fatigue ?? m.fatigue_score ?? m.perceived_fatigue ?? null;
+            const stress = m.stress ?? m.stress_score ?? m.perceived_stress ?? null;
+            const sleep = m.sleep ?? m.sleep_quality ?? m.sleep_score ?? m.sommeil ?? null;
+            const doms = m.doms ?? m.muscle_soreness ?? m.soreness ?? m.douleurs ?? null;
+            const mood = m.mood ?? m.motivation ?? m.well_being ?? m.wellbeing ?? m.humeur ?? null;
+            const hrv = m.hrv ?? m.heart_rate_variability ?? m.hrv_value ?? null;
+            const date = (m.date || m.created_at || m.timestamp || "").slice(0, 10);
+            if (!date) return null;
+            // N'inclure que si au moins une valeur Hooper est présente
+            if (fatigue === null && stress === null && sleep === null && doms === null && mood === null) return null;
+            return {
+              date,
+              fatigue: fatigue ?? 5,
+              stress: stress ?? 5,
+              sleep: sleep ?? 7,
+              doms: doms ?? 3,
+              mood: mood ?? 7,
+              hrv: hrv,
+              rpe: m.rpe ?? m.perceived_exertion ?? null,
+            };
+          }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
+
+          const sport = a.sport || a.sport_type || a.discipline || a.main_sport || "";
+          return { ...a, color, sport, _hoopers: hoopers, _sessions: sessions };
+        } catch(e) {
+          console.error("Erreur athlète", a.id, e);
+          return { ...a, color, _hoopers: [], _sessions: [] };
+        }
       }));
-      setAthletes(enriched); setSelected(enriched[0]||null); setScreen("app");
-    } catch { localStorage.removeItem("nolio_token"); setScreen("setup"); }
+
+      setAthletes(enriched);
+      setSelected(enriched[0] || null);
+      setScreen("app");
+    } catch(e) {
+      console.error("Erreur chargement", e);
+      localStorage.removeItem("nolio_token");
+      setScreen("setup");
+    }
   }
 
   function startDemo() { setDemoMode(true); const enriched = DEMO_ATHLETES.map(a => ({ ...a, _hoopers: DEMO_HOOPER[a.id], _sessions: DEMO_SESSIONS[a.id] })); setAthletes(enriched); setSelected(enriched[0]); setScreen("app"); }
@@ -953,6 +1050,7 @@ export default function App() {
               <div style={{ width:5, height:5, borderRadius:"50%", background:"#00e5ff", animation:"blink 2s infinite" }} />{athletes.length} athlètes
             </div>
             <button onClick={disconnect} style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:7, padding:"3px 9px", color:"rgba(255,255,255,0.35)", fontSize:9, cursor:"pointer" }}>Déconnexion</button>
+            <button onClick={() => { const d = localStorage.getItem("nolio_debug"); if(d) { const p = JSON.parse(d); alert("ATHLÈTE CLÉS: " + p.athleteKeys.join(", ") + "\n\nSÉANCES RÉALISÉES: " + p.doneCount + "\nPREMIÈRE: " + JSON.stringify(p.firstDone, null, 2).slice(0,400) + "\n\nSÉANCES PRÉVUES: " + p.planCount + "\nPREMIÈRE: " + JSON.stringify(p.firstPlan, null, 2).slice(0,400) + "\n\nMÉTRIQUES: " + p.metCount + "\nPREMIÈRE: " + JSON.stringify(p.firstMet, null, 2).slice(0,400)); } else { alert("Pas encore de debug. Reconnectez-vous."); } }} style={{ background:"rgba(255,165,0,0.1)", border:"1px solid rgba(255,165,0,0.3)", borderRadius:7, padding:"3px 9px", color:"#f7971e", fontSize:9, cursor:"pointer" }}>🔍 Debug</button>
           </div>
         </div>
       </div>
