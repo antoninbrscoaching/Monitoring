@@ -922,45 +922,41 @@ export default function App() {
         }));
       }
 
-      // Nolio: fetch ALL sessions once, then split by athlete nolio_id
-      setLoadMsg("Chargement de toutes les séances...");
-      const [allDoneRes, allPlanRes, allMetRes] = await Promise.allSettled([
-        fetch(NOLIO_CONFIG.API_BASE + "/get/training/?after=" + afterStr + "&before=" + beforeStr, { headers }),
-        fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?after=" + afterStr + "&before=" + beforeStr, { headers }),
-        fetch(NOLIO_CONFIG.API_BASE + "/get/metric/", { headers }),
-      ]);
-      const allRawDone = allDoneRes.status === "fulfilled" ? await allDoneRes.value.json().catch(() => []) : [];
-      const allRawPlan = allPlanRes.status === "fulfilled" ? await allPlanRes.value.json().catch(() => []) : [];
-      const allRawMet  = allMetRes.status  === "fulfilled" ? await allMetRes.value.json().catch(() => [])  : [];
-      const allDone = Array.isArray(allRawDone) ? allRawDone : (allRawDone.results || allRawDone.trainings || []);
-      const allPlan = Array.isArray(allRawPlan) ? allRawPlan : (allRawPlan.results || allRawPlan.trainings || []);
-      const allMet  = Array.isArray(allRawMet)  ? allRawMet  : (allRawMet.results  || allRawMet.metrics   || []);
-
-      // Store debug for first session
-      localStorage.setItem("nolio_debug", JSON.stringify({
-        totalDone: allDone.length, totalPlan: allPlan.length, totalMet: allMet.length,
-        firstDone: allDone[0] || null, firstPlan: allPlan[0] || null, firstMet: allMet[0] || null,
-        athleteKeys: Object.keys(list[0] || {}), firstAthlete: list[0] || {},
-      }));
-
-      const enriched = list.map((a, idx) => {
+      // Nolio: load each athlete's data individually using their nolio_id
+      const enriched = await Promise.all(list.map(async (a, idx) => {
         const color = COLORS[idx % COLORS.length];
         const athleteId = a.nolio_id;
+        setLoadMsg("Chargement : " + (a.name || "athlète " + (idx+1)) + "...");
         try {
-          // Filter sessions belonging to this athlete by nolio_id
-          const doneList = allDone.filter(w => w.nolio_id === athleteId || w.athlete_id === athleteId || w.user_id === athleteId);
-          const planList = allPlan.filter(p => p.nolio_id === athleteId || p.athlete_id === athleteId || p.user_id === athleteId);
-          const metList  = allMet.filter(m  => m.nolio_id === athleteId || m.athlete_id === athleteId || m.user_id === athleteId);
+          const [wr, pr, mr] = await Promise.allSettled([
+            fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + athleteId, { headers }),
+          ]);
+          const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
+          const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
+          const rawMet  = mr.status === "fulfilled" ? await mr.value.json().catch(() => []) : [];
+          const doneList = Array.isArray(rawDone) ? rawDone : (rawDone.results || rawDone.trainings || []);
+          const planList = Array.isArray(rawPlan) ? rawPlan : (rawPlan.results || rawPlan.trainings || []);
+          const metList  = Array.isArray(rawMet)  ? rawMet  : (rawMet.results  || rawMet.metrics   || []);
+          // Debug for first athlete
+          if (idx === 0) {
+            localStorage.setItem("nolio_debug", JSON.stringify({
+              athleteId, athleteObj: a,
+              doneCount: doneList.length, planCount: planList.length, metCount: metList.length,
+              firstDone: doneList[0] || null, firstPlan: planList[0] || null, firstMet: metList[0] || null,
+            }));
+          }
 
           // Parsing séances réalisées
           const map = {};
           planList.forEach(p => {
-            const d = (p.date || p.scheduled_date || p.start_date || p.planned_date || "").slice(0, 10);
+            const d = (p.date_start || p.date || p.scheduled_date || p.start_date || p.planned_date || "").slice(0, 10);
             if (!d) return;
-            // Durée : Nolio stocke en secondes si > 3600, sinon en minutes
-            const durRaw = p.duration_planned || p.planned_duration || p.duration || p.moving_time || p.elapsed_time || 0;
-            const dur = durRaw >= 3600 ? Math.round(durRaw / 60) : (durRaw > 0 ? durRaw : 0);
-            const tss = p.tss_planned || p.planned_tss || p.tss || p.training_stress_score || 0;
+            // Nolio stocke en secondes (comme pour les séances réalisées)
+            const durRaw = p.duration || p.duration_planned || p.planned_duration || p.moving_time || p.elapsed_time || 0;
+            const dur = durRaw >= 60 ? Math.round(durRaw / 60) : (durRaw > 0 ? durRaw : 0);
+            const tss = p.load_coggan || p.tss_planned || p.planned_tss || p.tss || p.training_stress_score || 0;
             const rpe = p.rpe_planned || p.rpe || null;
             const type = p.name || p.title || p.workout_type || p.sport || p.sport_type || p.type || "Séance";
             const zone = p.zone || (type.toLowerCase().includes("z3") || type.toLowerCase().includes("vo2") || type.toLowerCase().includes("fractionné") ? 3 : type.toLowerCase().includes("z2") || type.toLowerCase().includes("seuil") || type.toLowerCase().includes("tempo") ? 2 : 1);
@@ -1070,7 +1066,7 @@ export default function App() {
               <div style={{ width:5, height:5, borderRadius:"50%", background:"#00e5ff", animation:"blink 2s infinite" }} />{athletes.length} athlètes
             </div>
             <button onClick={disconnect} style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:7, padding:"3px 9px", color:"rgba(255,255,255,0.35)", fontSize:9, cursor:"pointer" }}>Déconnexion</button>
-            <button onClick={() => { const d = localStorage.getItem("nolio_debug"); if(d) { const p = JSON.parse(d); alert("ATHLÈTE CLÉS: " + p.athleteKeys.join(", ") + "\n\nSÉANCES RÉALISÉES: " + p.doneCount + "\nPREMIÈRE: " + JSON.stringify(p.firstDone, null, 2).slice(0,400) + "\n\nSÉANCES PRÉVUES: " + p.planCount + "\nPREMIÈRE: " + JSON.stringify(p.firstPlan, null, 2).slice(0,400) + "\n\nMÉTRIQUES: " + p.metCount + "\nPREMIÈRE: " + JSON.stringify(p.firstMet, null, 2).slice(0,400)); } else { alert("Pas encore de debug. Reconnectez-vous."); } }} style={{ background:"rgba(255,165,0,0.1)", border:"1px solid rgba(255,165,0,0.3)", borderRadius:7, padding:"3px 9px", color:"#f7971e", fontSize:9, cursor:"pointer" }}>🔍 Debug</button>
+            <button onClick={() => { const d = localStorage.getItem("nolio_debug"); if(d) { const p = JSON.parse(d); const keys = p.athleteKeys || Object.keys(p.athleteObj||{}); alert("ATHLÈTE ID: " + p.athleteId + "\nCLÉS: " + keys.join(", ") + "\n\nSÉANCES RÉALISÉES: " + p.doneCount + "\nPREMIÈRE: " + JSON.stringify(p.firstDone, null, 2).slice(0,500) + "\n\nSÉANCES PRÉVUES: " + p.planCount + "\nPREMIÈRE: " + JSON.stringify(p.firstPlan, null, 2).slice(0,500) + "\n\nMÉTRIQUES: " + p.metCount + "\nPREMIÈRE: " + JSON.stringify(p.firstMet, null, 2).slice(0,500)); } else { alert("Pas encore de debug. Reconnectez-vous."); } }} style={{ background:"rgba(255,165,0,0.1)", border:"1px solid rgba(255,165,0,0.3)", borderRadius:7, padding:"3px 9px", color:"#f7971e", fontSize:9, cursor:"pointer" }}>🔍 Debug</button>
           </div>
         </div>
       </div>
