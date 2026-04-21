@@ -908,8 +908,10 @@ export default function App() {
         const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
         const rawMet  = mr.status === "fulfilled" ? await mr.value.json().catch(() => []) : [];
         // Stocker le diagnostic pour affichage
+        const firstId = firstAthlete.nolio_id || firstAthlete.id;
         localStorage.setItem("nolio_debug", JSON.stringify({
-          athleteId: firstAthlete.id,
+          athleteId: firstId,
+          athleteAllFields: firstAthlete,
           athleteKeys: Object.keys(firstAthlete),
           doneCount: (Array.isArray(rawDone) ? rawDone : rawDone.results || []).length,
           planCount: (Array.isArray(rawPlan) ? rawPlan : rawPlan.results || []).length,
@@ -920,13 +922,19 @@ export default function App() {
         }));
       }
 
+      // Detect correct athlete ID field from first athlete
+      const sampleAthlete = list[0] || {};
+      const idField = sampleAthlete.nolio_id !== undefined ? "nolio_id" : sampleAthlete.id !== undefined ? "id" : "nolio_id";
+      console.log("Using athlete ID field:", idField, "value:", sampleAthlete[idField]);
+
       const enriched = await Promise.all(list.map(async (a, idx) => {
         const color = COLORS[idx % COLORS.length];
+        const athleteId = a[idField] || a.nolio_id || a.id;
         try {
           const [wr, pr, mr] = await Promise.allSettled([
-            fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + (a.nolio_id||a.id) + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-            fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + (a.nolio_id||a.id) + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-            fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + (a.nolio_id||a.id), { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + athleteId, { headers }),
           ]);
           const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
           const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
@@ -1000,7 +1008,7 @@ export default function App() {
           const sport = a.sport || a.sport_type || a.discipline || a.main_sport || "";
           return { ...a, color, sport, _hoopers: hoopers, _sessions: sessions };
         } catch(e) {
-          console.error("Erreur athlète", a.id, e);
+          console.error("Erreur athlète", athleteId, e);
           return { ...a, color, _hoopers: [], _sessions: [] };
         }
       }));
