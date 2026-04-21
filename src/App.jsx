@@ -922,26 +922,35 @@ export default function App() {
         }));
       }
 
-      // Detect correct athlete ID field from first athlete
-      const sampleAthlete = list[0] || {};
-      const idField = sampleAthlete.nolio_id !== undefined ? "nolio_id" : sampleAthlete.id !== undefined ? "id" : "nolio_id";
-      console.log("Using athlete ID field:", idField, "value:", sampleAthlete[idField]);
+      // Nolio: fetch ALL sessions once, then split by athlete nolio_id
+      setLoadMsg("Chargement de toutes les séances...");
+      const [allDoneRes, allPlanRes, allMetRes] = await Promise.allSettled([
+        fetch(NOLIO_CONFIG.API_BASE + "/get/training/?after=" + afterStr + "&before=" + beforeStr, { headers }),
+        fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?after=" + afterStr + "&before=" + beforeStr, { headers }),
+        fetch(NOLIO_CONFIG.API_BASE + "/get/metric/", { headers }),
+      ]);
+      const allRawDone = allDoneRes.status === "fulfilled" ? await allDoneRes.value.json().catch(() => []) : [];
+      const allRawPlan = allPlanRes.status === "fulfilled" ? await allPlanRes.value.json().catch(() => []) : [];
+      const allRawMet  = allMetRes.status  === "fulfilled" ? await allMetRes.value.json().catch(() => [])  : [];
+      const allDone = Array.isArray(allRawDone) ? allRawDone : (allRawDone.results || allRawDone.trainings || []);
+      const allPlan = Array.isArray(allRawPlan) ? allRawPlan : (allRawPlan.results || allRawPlan.trainings || []);
+      const allMet  = Array.isArray(allRawMet)  ? allRawMet  : (allRawMet.results  || allRawMet.metrics   || []);
 
-      const enriched = await Promise.all(list.map(async (a, idx) => {
+      // Store debug for first session
+      localStorage.setItem("nolio_debug", JSON.stringify({
+        totalDone: allDone.length, totalPlan: allPlan.length, totalMet: allMet.length,
+        firstDone: allDone[0] || null, firstPlan: allPlan[0] || null, firstMet: allMet[0] || null,
+        athleteKeys: Object.keys(list[0] || {}), firstAthlete: list[0] || {},
+      }));
+
+      const enriched = list.map((a, idx) => {
         const color = COLORS[idx % COLORS.length];
-        const athleteId = a[idField] || a.nolio_id || a.id;
+        const athleteId = a.nolio_id;
         try {
-          const [wr, pr, mr] = await Promise.allSettled([
-            fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-            fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-            fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + athleteId, { headers }),
-          ]);
-          const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
-          const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
-          const rawMet  = mr.status === "fulfilled" ? await mr.value.json().catch(() => []) : [];
-          const doneList = Array.isArray(rawDone) ? rawDone : (rawDone.results || rawDone.trainings || []);
-          const planList = Array.isArray(rawPlan) ? rawPlan : (rawPlan.results || rawPlan.trainings || []);
-          const metList  = Array.isArray(rawMet)  ? rawMet  : (rawMet.results  || rawMet.metrics   || []);
+          // Filter sessions belonging to this athlete by nolio_id
+          const doneList = allDone.filter(w => w.nolio_id === athleteId || w.athlete_id === athleteId || w.user_id === athleteId);
+          const planList = allPlan.filter(p => p.nolio_id === athleteId || p.athlete_id === athleteId || p.user_id === athleteId);
+          const metList  = allMet.filter(m  => m.nolio_id === athleteId || m.athlete_id === athleteId || m.user_id === athleteId);
 
           // Parsing séances réalisées
           const map = {};
