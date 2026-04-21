@@ -77,8 +77,8 @@ const DEMO_SESSIONS = { 1: genSessions("Triathlon"), 2: genSessions("Course à p
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 const hooperScore = e => e ? e.fatigue + e.stress + e.doms + (8 - e.sleep) : null;
 const hooperStatus = s => s <= 12 ? { label: "Optimal", color: "#43e97b", icon: "✦" } : s <= 18 ? { label: "Attention", color: "#f7971e", icon: "◈" } : { label: "Surcharge", color: "#ff6b6b", icon: "⚠" };
-const initials = a => { const fn = a.first_name||a.firstname||a.prenom||""; const ln = a.last_name||a.lastname||a.nom||""; if (fn&&ln) return (fn[0]+ln[0]).toUpperCase(); if (fn) return fn.slice(0,2).toUpperCase(); if (ln) return ln.slice(0,2).toUpperCase(); const un = a.username||a.name||a.email||""; return un ? un.slice(0,2).toUpperCase() : "??"; };
-const fullName = a => { const fn = a.first_name||a.firstname||a.prenom||""; const ln = a.last_name||a.lastname||a.nom||""; if (fn||ln) return (fn+" "+ln).trim(); return a.username||a.name||a.email?.split("@")[0]||"Athlète"; };
+const initials = a => { const name = a.name||a.username||""; if (name.trim()) { const parts = name.trim().split(" "); return parts.length >= 2 ? (parts[0][0]+parts[parts.length-1][0]).toUpperCase() : name.slice(0,2).toUpperCase(); } const fn=a.first_name||""; const ln=a.last_name||""; return ((fn[0]||"")+(ln[0]||"")).toUpperCase()||"??"; };
+const fullName = a => a.name || a.username || ((a.first_name||"")+" "+(a.last_name||"")).trim() || "Athlète";
 
 
 // ─── CHARGE METRICS : ACWR / RCAC + HRV + FORME ─────────────────────────────
@@ -782,7 +782,7 @@ function AthleteDetail({ athlete, onAnalyze }) {
                     <span style={{ color: "rgba(255,255,255,0.33)", fontSize: 10 }}>{s.date.slice(5)}</span>
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: zc }} title={`Z${s.zone}`} />
                     <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Prévu</div><div style={{ color: "white", fontSize: 11, fontWeight: 600 }}>{s.planned.type}</div><div style={{ color: "rgba(255,255,255,0.32)", fontSize: 9 }}>{s.planned.duration > 0 ? s.planned.duration + "min" : "—"} {s.planned.tss > 0 ? "· TSS " + s.planned.tss : ""} {s.planned.rpe ? "· RPE " + s.planned.rpe : ""}</div></div>
-                    <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Réalisé</div>{s.done?<><div style={{color:"white",fontSize:11,fontWeight:600}}>{s.done.type}</div><div style={{color:"rgba(255,255,255,0.32)",fontSize:9}}>{s.done.duration > 0 ? s.done.duration + "min" : "—"} {s.done.tss > 0 ? "· TSS " + s.done.tss : ""} {s.done.rpe ? <span style={{color:"#f7971e",fontWeight:700}}>{"· RPE " + s.done.rpe}</span> : ""}</div></>:s.compliance===null?<div style={{color:"rgba(255,255,255,0.22)",fontSize:10}}>À venir</div>:<div style={{color:"#ff6b6b",fontSize:10}}>Non réalisé</div>}</div>
+                    <div><div style={{ color: "rgba(255,255,255,0.25)", fontSize: 8, textTransform: "uppercase", letterSpacing: 1 }}>Réalisé</div>{s.done?<><div style={{color:"white",fontSize:11,fontWeight:600}}>{s.done.type}</div><div style={{color:"rgba(255,255,255,0.32)",fontSize:9}}>{s.done.duration > 0 ? s.done.duration + "min" : "—"} {s.done.distance ? "· " + s.done.distance + "km" : ""} {s.done.tss > 0 ? "· TSS " + s.done.tss : ""} {s.done.rpe > 0 ? <span style={{color:"#f7971e",fontWeight:700}}>{"· RPE " + s.done.rpe}</span> : ""}</div></>:s.compliance===null?<div style={{color:"rgba(255,255,255,0.22)",fontSize:10}}>À venir</div>:<div style={{color:"#ff6b6b",fontSize:10}}>Non réalisé</div>}</div>
                     {s.compliance !== null && <div style={{ background: cc + "1a", border: `1px solid ${cc}44`, borderRadius: 6, padding: "3px 7px", color: cc, fontSize: 10, fontWeight: 700, textAlign: "center" }}>{s.compliance === 0 ? "✗" : s.compliance + "%"}</div>}
                   </div>;
                 })}
@@ -900,9 +900,9 @@ export default function App() {
       const firstAthlete = list[0];
       if (firstAthlete) {
         const [wr, pr, mr] = await Promise.allSettled([
-          fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + firstAthlete.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-          fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + firstAthlete.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-          fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + firstAthlete.id, { headers }),
+          fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + (firstAthlete.nolio_id||firstAthlete.id) + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+          fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + (firstAthlete.nolio_id||firstAthlete.id) + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+          fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + (firstAthlete.nolio_id||firstAthlete.id), { headers }),
         ]);
         const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
         const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
@@ -924,9 +924,9 @@ export default function App() {
         const color = COLORS[idx % COLORS.length];
         try {
           const [wr, pr, mr] = await Promise.allSettled([
-            fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + a.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-            fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + a.id + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
-            fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + a.id, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + (a.nolio_id||a.id) + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + (a.nolio_id||a.id) + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
+            fetch(NOLIO_CONFIG.API_BASE + "/get/metric/?athlete=" + (a.nolio_id||a.id), { headers }),
           ]);
           const rawDone = wr.status === "fulfilled" ? await wr.value.json().catch(() => []) : [];
           const rawPlan = pr.status === "fulfilled" ? await pr.value.json().catch(() => []) : [];
@@ -951,19 +951,22 @@ export default function App() {
           });
 
           doneList.forEach(w => {
-            const d = (w.date || w.start_date || w.scheduled_date || "").slice(0, 10);
+            // Nolio: date_start, duration (seconds), load_coggan (TSS), rpe, sport, name
+            const d = (w.date_start || w.date || w.start_date || "").slice(0, 10);
             if (!d) return;
-            const durRaw = w.duration || w.moving_time || w.elapsed_time || w.total_duration || 0;
-            const dur = durRaw >= 3600 ? Math.round(durRaw / 60) : (durRaw > 0 ? durRaw : 0);
-            const tss = w.tss || w.training_stress_score || w.tss_actual || 0;
-            const rpe = w.rpe || w.perceived_exertion || w.rpe_actual || null;
-            const type = w.name || w.title || w.sport || w.sport_type || w.workout_type || w.type || "Séance";
-            const zone = w.zone || (type.toLowerCase().includes("z3") || type.toLowerCase().includes("vo2") || type.toLowerCase().includes("fractionné") ? 3 : type.toLowerCase().includes("z2") || type.toLowerCase().includes("seuil") || type.toLowerCase().includes("tempo") ? 2 : 1);
+            const durSec = w.duration || w.moving_time || w.elapsed_time || 0;
+            const dur = Math.round(durSec / 60); // toujours en secondes chez Nolio
+            const tss = w.load_coggan || w.tss || w.training_stress_score || 0;
+            const rpe = (w.rpe && w.rpe > 0) ? w.rpe : null;
+            const type = w.name || w.sport || w.sport_type || w.workout_type || "Séance";
+            const sport = w.sport || w.sport_type || "";
+            const zone = w.zone || (sport.toLowerCase().includes("fractionné") || type.toLowerCase().includes("vo2") || type.toLowerCase().includes("z3") ? 3 : sport.toLowerCase().includes("seuil") || type.toLowerCase().includes("z2") || type.toLowerCase().includes("tempo") ? 2 : 1);
+            const distance = w.distance ? Math.round(w.distance * 10) / 10 : null;
             if (map[d]) {
-              map[d].done = { type, duration: dur, tss, rpe };
+              map[d].done = { type, duration: dur, tss: Math.round(tss), rpe, distance };
               map[d].compliance = map[d].planned.duration > 0 ? Math.round(dur / map[d].planned.duration * 100) : 100;
             } else {
-              map[d] = { date: d, zone, planned: { type, duration: dur, tss, rpe }, done: { type, duration: dur, tss, rpe }, compliance: 100 };
+              map[d] = { date: d, zone, planned: { type, duration: dur, tss: Math.round(tss), rpe, distance }, done: { type, duration: dur, tss: Math.round(tss), rpe, distance }, compliance: 100 };
             }
           });
 
