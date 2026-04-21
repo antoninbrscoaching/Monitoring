@@ -923,11 +923,16 @@ export default function App() {
       }
 
       // Nolio: load each athlete's data individually using their nolio_id
-      const enriched = await Promise.all(list.map(async (a, idx) => {
+      // Load sequentially to avoid rate limits (200 req/hour)
+      // Each athlete needs 3 requests = 13 athletes = 39 requests total
+      const enriched = [];
+      for (let idx = 0; idx < list.length; idx++) {
+        const a = list[idx];
         const color = COLORS[idx % COLORS.length];
         const athleteId = a.nolio_id;
-        setLoadMsg("Chargement : " + (a.name || "athlète " + (idx+1)) + "...");
+        setLoadMsg("Chargement " + (idx+1) + "/" + list.length + " : " + (a.name || "athlète"));
         try {
+          // API filter ?athlete=ID returns sessions FOR that athlete - trust it
           const [wr, pr, mr] = await Promise.allSettled([
             fetch(NOLIO_CONFIG.API_BASE + "/get/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
             fetch(NOLIO_CONFIG.API_BASE + "/get/planned/training/?athlete=" + athleteId + "&after=" + afterStr + "&before=" + beforeStr, { headers }),
@@ -939,7 +944,6 @@ export default function App() {
           const doneList = Array.isArray(rawDone) ? rawDone : (rawDone.results || rawDone.trainings || []);
           const planList = Array.isArray(rawPlan) ? rawPlan : (rawPlan.results || rawPlan.trainings || []);
           const metList  = Array.isArray(rawMet)  ? rawMet  : (rawMet.results  || rawMet.metrics   || []);
-          // Debug for first athlete
           if (idx === 0) {
             localStorage.setItem("nolio_debug", JSON.stringify({
               athleteId, athleteObj: a,
@@ -1011,12 +1015,12 @@ export default function App() {
           }).filter(Boolean).sort((a, b) => a.date.localeCompare(b.date));
 
           const sport = a.sport || a.sport_type || a.discipline || a.main_sport || "";
-          return { ...a, color, sport, _hoopers: hoopers, _sessions: sessions };
+          enriched.push({ ...a, color, sport, _hoopers: hoopers, _sessions: sessions });
         } catch(e) {
           console.error("Erreur athlète", athleteId, e);
-          return { ...a, color, _hoopers: [], _sessions: [] };
+          enriched.push({ ...a, color, _hoopers: [], _sessions: [] });
         }
-      }));
+      }
 
       setAthletes(enriched);
       setSelected(enriched[0] || null);
